@@ -3,7 +3,8 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 
 // ⚠️ 替换成你的真实凭证（从 Supabase Settings -> API 中复制）https://ixyzmyfclaxvmritrxa.supabase.co
 //const SUPABASE_URL = 'https://ixyzmvfclaxvmritrxa.supabase.co';
-const SUPABASE_URL = 'https://ixyzmvyfclaxvmritrxa.supabase.co';
+//https://ixyzmvyfclaxvmritrxa.supabase.co/rest/v1/
+const SUPABASE_URL = 'https://black-brook-8bb8.wang192515.workers.dev';
 const SUPABASE_ANON_KEY = 'sb_publishable_FbpCE5UvEnCmuFcpRXMj5Q_hsFjm_ys';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
