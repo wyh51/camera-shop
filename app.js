@@ -1,15 +1,13 @@
 // ==================== Supabase 初始化 ====================
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-// ⚠️ 替换成你的真实凭证（从 Supabase Settings -> API 中复制）https://ixyzmyfclaxvmritrxa.supabase.co
-//const SUPABASE_URL = 'https://ixyzmvfclaxvmritrxa.supabase.co';
-//https://ixyzmvyfclaxvmritrxa.supabase.co/rest/v1/
+// ⚠️ 请替换为你的实际凭证（目前使用 Cloudflare Worker 代理）
 const SUPABASE_URL = 'https://black-brook-8bb8.wang192515.workers.dev';
 const SUPABASE_ANON_KEY = 'sb_publishable_FbpCE5UvEnCmuFcpRXMj5Q_hsFjm_ys';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// ==================== 卖家入口控制（密码验证保留） ====================
+// ==================== 卖家入口控制（密码验证并设置卖家标记） ====================
 const sellerSection = document.getElementById("sellerSection");
 const sellerEntryBtn = document.getElementById("sellerEntryBtn");
 
@@ -18,6 +16,7 @@ sellerEntryBtn.addEventListener("click", () => {
   if (password === "192515") {
     sellerSection.style.display = "block";
     sellerEntryBtn.style.display = "none";
+    window.isSeller = true;   // ✅ 标记当前用户为卖家
   } else if (password !== null) {
     alert("密码错误！");
   }
@@ -27,6 +26,7 @@ sellerEntryBtn.addEventListener("click", () => {
 window.hideSellerSection = function() {
   sellerSection.style.display = "none";
   sellerEntryBtn.style.display = "inline-block";
+  window.isSeller = false;   // ✅ 取消卖家标记
 };
 
 // ==================== 页面初始化 ====================
@@ -44,7 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // ⭐ 开启实时监听：一旦有新的 INSERT 就自动添加到页面
+  // ⭐ 开启实时监听：INSERT 和 DELETE 事件
   supabase
     .channel('products-channel')
     .on(
@@ -55,6 +55,15 @@ document.addEventListener("DOMContentLoaded", () => {
         prependProduct(payload.new);
       }
     )
+    .on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'products' },
+      (payload) => {
+        console.log('实时删除商品 ID:', payload.old.id);
+        const productElement = document.getElementById(`product-${payload.old.id}`);
+        if (productElement) productElement.remove();
+      }
+    )
     .subscribe();
 });
 
@@ -63,7 +72,7 @@ async function loadProducts() {
   const { data, error } = await supabase
     .from('products')
     .select('*')
-    .order('id', { ascending: false });  // 如果你有 created_at 字段，可换成 .order('created_at', ...)
+    .order('id', { ascending: false });  // 如果有 created_at 字段，可换成 .order('created_at', { ascending: false })
 
   if (error) {
     console.error("加载商品失败:", error.message);
@@ -87,6 +96,11 @@ function renderProduct(product, container, prepend = false) {
     imgTag = `<img src="${escapeHtml(product.image)}" width="200" onerror="this.style.display='none'">`;
   }
 
+  // 根据是否为卖家显示删除按钮
+  const deleteButton = window.isSeller
+    ? `<button onclick="deleteProduct(${product.id})" style="background:#e53935; color:white; margin-left:8px;">删除</button>`
+    : '';
+
   div.innerHTML = `
     <div>
       <h3>${escapeHtml(product.name)}</h3>
@@ -95,6 +109,7 @@ function renderProduct(product, container, prepend = false) {
       <p>${escapeHtml(product.category || '')}</p>
       <p>${escapeHtml(product.description || '')}</p>
       <button onclick="addToCart(${product.id})">加入购物车</button>
+      ${deleteButton}
     </div>
   `;
 
@@ -155,6 +170,7 @@ window.publishProduct = async function() {
     imageUrl = await uploadImageToSupabase(fileInput.files[0]);
     if (!imageUrl) {
       document.getElementById("uploadStatus").textContent = "上传失败，请检查存储桶策略";
+      // 如果希望即使图片上传失败也能发布无图商品，可以将下一行的 return 注释掉
       return;
     }
     document.getElementById("uploadStatus").textContent = "图片上传成功";
@@ -186,6 +202,26 @@ window.publishProduct = async function() {
   fileInput.value = "";
   document.getElementById("preview").style.display = "none";
   document.getElementById("uploadStatus").textContent = "";
+};
+
+// ==================== 删除商品 ====================
+window.deleteProduct = async function(id) {
+  if (!confirm('确定要删除这个商品吗？')) return;
+
+  const { error } = await supabase
+    .from('products')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    alert('删除失败：' + error.message);
+    return;
+  }
+
+  // 立即从页面上移除该商品卡片（即使 Realtime 也会再次移除，双重保险）
+  const productElement = document.getElementById(`product-${id}`);
+  if (productElement) productElement.remove();
+  alert('商品已删除');
 };
 
 // ==================== 购物车示例 ====================
