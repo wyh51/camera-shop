@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Camera Shop</title>
+  <style>
+    body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
+    .product { border: 1px solid #ddd; padding: 15px; margin: 10px 0; display: flex; align-items: center; gap: 20px; }
+    .product img { width: 150px; height: auto; }
+    button { padding: 8px 16px; cursor: pointer; }
+    .upload-section { background: #f9f9f9; padding: 20px; margin-bottom: 30px; display: none; } /* 默认隐藏 */
+    input, textarea { width: 100%; padding: 8px; margin: 5px 0; box-sizing: border-box; }
+    .preview { margin-top: 10px; display: none; }
+    .seller-btn { margin-bottom: 20px; background: #ff9800; color: white; border: none; }
+  </style>
+</head>
+<body>
+  <h1>摄像头商城</h1>
+
+  <!-- 卖家入口按钮 -->
+  <button class="seller-btn" id="sellerEntryBtn">卖家入口</button>
+
+  <!-- 卖家上传区（默认隐藏） -->
+  <div class="upload-section" id="sellerSection">
+    <h2>添加新商品（卖家使用）</h2>
+    <input type="text" id="name" placeholder="商品名称" required>
+    <input type="number" id="price" placeholder="价格" step="0.01" required>
+    <input type="text" id="category" placeholder="分类（如：室外/室内）">
+    <textarea id="description" placeholder="描述" rows="3"></textarea>
+
+    <p>上传图片：</p>
+    <input type="file" id="imageInput" accept="image/*">
+    <img id="preview" class="preview" width="200">
+    <p id="uploadStatus" style="color: gray;"></p>
+
+    <button onclick="publishProduct()">发布商品</button>
+    <button onclick="hideSellerSection()" style="background:#ccc;">退出卖家模式</button>
+  </div>
+
+  <!-- 商品展示区（买家看到的） -->
+  <h2>商品列表</h2>
+  <div id="products"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
