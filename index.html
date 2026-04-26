@@ -8,7 +8,7 @@
     .product { border: 1px solid #ddd; padding: 15px; margin: 10px 0; display: flex; align-items: center; gap: 20px; }
     .product img { width: 150px; height: auto; }
     button { padding: 8px 16px; cursor: pointer; }
-    .upload-section { background: #f9f9f9; padding: 20px; margin-bottom: 30px; display: none; } /* 默认隐藏 */
+    .upload-section { background: #f9f9f9; padding: 20px; margin-bottom: 30px; display: none; }
     input, textarea { width: 100%; padding: 8px; margin: 5px 0; box-sizing: border-box; }
     .preview { margin-top: 10px; display: none; }
     .seller-btn { margin-bottom: 20px; background: #ff9800; color: white; border: none; }
@@ -37,10 +37,11 @@
     <button onclick="hideSellerSection()" style="background:#ccc;">退出卖家模式</button>
   </div>
 
-  <!-- 商品展示区（买家看到的） -->
-  <h2>商品列表</h2>
+  <!-- 商品展示区 -->
+  <h2>商品列表 <small>（实时更新）</small></h2>
   <div id="products"></div>
 
-  <script src="app.js"></script>
+  <!-- ⚠️ 关键：必须使用 type="module" 才能让 app.js 中的 import 生效 -->
+  <script type="module" src="app.js"></script>
 </body>
 </html>
