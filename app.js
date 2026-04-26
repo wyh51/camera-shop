@@ -1,13 +1,13 @@
 // ==================== Supabase 初始化 ====================
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-// ⚠️ 请替换为你的实际凭证（目前使用 Cloudflare Worker 代理）
+// 你的凭证（使用 Cloudflare Worker 代理）
 const SUPABASE_URL = 'https://black-brook-8bb8.wang192515.workers.dev';
 const SUPABASE_ANON_KEY = 'sb_publishable_FbpCE5UvEnCmuFcpRXMj5Q_hsFjm_ys';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// ==================== 卖家入口控制（密码验证并设置卖家标记） ====================
+// ==================== 卖家入口控制 ====================
 const sellerSection = document.getElementById("sellerSection");
 const sellerEntryBtn = document.getElementById("sellerEntryBtn");
 
@@ -16,7 +16,9 @@ sellerEntryBtn.addEventListener("click", () => {
   if (password === "192515") {
     sellerSection.style.display = "block";
     sellerEntryBtn.style.display = "none";
-    window.isSeller = true;   // ✅ 标记当前用户为卖家
+    window.isSeller = true;
+    // ✅ 重新渲染商品列表，立即显示删除按钮
+    loadProducts();
   } else if (password !== null) {
     alert("密码错误！");
   }
@@ -26,12 +28,13 @@ sellerEntryBtn.addEventListener("click", () => {
 window.hideSellerSection = function() {
   sellerSection.style.display = "none";
   sellerEntryBtn.style.display = "inline-block";
-  window.isSeller = false;   // ✅ 取消卖家标记
+  window.isSeller = false;
+  // ✅ 重新渲染商品列表，隐藏删除按钮
+  loadProducts();
 };
 
 // ==================== 页面初始化 ====================
 document.addEventListener("DOMContentLoaded", () => {
-  // 加载已有商品
   loadProducts();
 
   // 图片预览
@@ -44,7 +47,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // ⭐ 开启实时监听：INSERT 和 DELETE 事件
+  // 实时监听：INSERT 和 DELETE
   supabase
     .channel('products-channel')
     .on(
@@ -67,12 +70,12 @@ document.addEventListener("DOMContentLoaded", () => {
     .subscribe();
 });
 
-// ==================== 加载所有商品（从 Supabase 读取） ====================
+// ==================== 加载所有商品 ====================
 async function loadProducts() {
   const { data, error } = await supabase
     .from('products')
     .select('*')
-    .order('id', { ascending: false });  // 如果有 created_at 字段，可换成 .order('created_at', { ascending: false })
+    .order('id', { ascending: false }); // 新建商品会出现在最上面
 
   if (error) {
     console.error("加载商品失败:", error.message);
@@ -96,7 +99,7 @@ function renderProduct(product, container, prepend = false) {
     imgTag = `<img src="${escapeHtml(product.image)}" width="200" onerror="this.style.display='none'">`;
   }
 
-  // 根据是否为卖家显示删除按钮
+  // 根据是否为卖家决定是否显示删除按钮
   const deleteButton = window.isSeller
     ? `<button onclick="deleteProduct(${product.id})" style="background:#e53935; color:white; margin-left:8px;">删除</button>`
     : '';
@@ -133,7 +136,7 @@ async function uploadImageToSupabase(file) {
   const filePath = `public/${fileName}`;
 
   const { data, error } = await supabase.storage
-    .from('product-images')    // 你的存储桶名称
+    .from('product-images')
     .upload(filePath, file, {
       cacheControl: '3600',
       upsert: false
@@ -151,7 +154,7 @@ async function uploadImageToSupabase(file) {
   return publicUrl;
 }
 
-// ==================== 发布商品（上传图片 + 写入 Supabase） ====================
+// ==================== 发布商品 ====================
 window.publishProduct = async function() {
   const name = document.getElementById("name").value.trim();
   const price = document.getElementById("price").value;
@@ -170,7 +173,6 @@ window.publishProduct = async function() {
     imageUrl = await uploadImageToSupabase(fileInput.files[0]);
     if (!imageUrl) {
       document.getElementById("uploadStatus").textContent = "上传失败，请检查存储桶策略";
-      // 如果希望即使图片上传失败也能发布无图商品，可以将下一行的 return 注释掉
       return;
     }
     document.getElementById("uploadStatus").textContent = "图片上传成功";
@@ -194,7 +196,7 @@ window.publishProduct = async function() {
   }
 
   alert("商品发布成功！");
-  // 清空表单（商品列表会由 Realtime 自动更新）
+  // 清空表单（商品列表会由 Realtime 自动更新，无需手动刷新）
   document.getElementById("name").value = "";
   document.getElementById("price").value = "";
   document.getElementById("category").value = "";
@@ -218,7 +220,7 @@ window.deleteProduct = async function(id) {
     return;
   }
 
-  // 立即从页面上移除该商品卡片（即使 Realtime 也会再次移除，双重保险）
+  // 立即从页面上移除该商品（即使 Realtime 也会再次移除，双重保险）
   const productElement = document.getElementById(`product-${id}`);
   if (productElement) productElement.remove();
   alert('商品已删除');
@@ -235,7 +237,6 @@ function escapeHtml(str) {
   div.appendChild(document.createTextNode(str));
   return div.innerHTML;
 }
-
 
 
 //git add .
