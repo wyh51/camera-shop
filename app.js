@@ -1,11 +1,20 @@
 // ==================== Supabase 初始化 ====================
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-// 你的凭证（使用 Cloudflare Worker 代理）
-const SUPABASE_URL = 'https://black-brook-8bb8.wang192515.workers.dev';
+// ⚠️ 关键修复：
+// - REST API（读写商品数据）→ 走 Cloudflare Worker 代理
+// - Storage（图片上传）→ 直接走真实 Supabase URL（Worker 不转发 Storage）
+// - Realtime（实时监听）→ 直接走真实 Supabase URL（Worker 不转发 WebSocket）
+
+const WORKER_URL = 'https://black-brook-8bb8.wang192515.workers.dev'; // Cloudflare Worker（代理 REST）
+const SUPABASE_REAL_URL = 'https://ixyzmvyfclaxvmritrxa.supabase.co'; // 真实 Supabase（Storage + Realtime）
 const SUPABASE_ANON_KEY = 'sb_publishable_FbpCE5UvEnCmuFcpRXMj5Q_hsFjm_ys';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// 主客户端：REST 走 Worker 代理（解决 CORS 问题）
+const supabase = createClient(WORKER_URL, SUPABASE_ANON_KEY);
+
+// 备用客户端：Storage 和 Realtime 直接走真实 Supabase
+const supabaseDirect = createClient(SUPABASE_REAL_URL, SUPABASE_ANON_KEY);
 
 // ==================== 卖家入口控制 ====================
 const sellerSection = document.getElementById("sellerSection");
@@ -17,28 +26,22 @@ sellerEntryBtn.addEventListener("click", () => {
     sellerSection.style.display = "block";
     sellerEntryBtn.style.display = "none";
     window.isSeller = true;
-    // ✅ 重新渲染商品列表，立即显示删除按钮
-    loadProducts();
   } else if (password !== null) {
     alert("密码错误！");
   }
 });
 
-// 退出卖家模式
-window.hideSellerSection = function() {
+window.hideSellerSection = function () {
   sellerSection.style.display = "none";
   sellerEntryBtn.style.display = "inline-block";
   window.isSeller = false;
-  // ✅ 重新渲染商品列表，隐藏删除按钮
-  loadProducts();
 };
 
 // ==================== 页面初始化 ====================
 document.addEventListener("DOMContentLoaded", () => {
   loadProducts();
 
-  // 图片预览
-  document.getElementById("imageInput").addEventListener("change", function(e) {
+  document.getElementById("imageInput").addEventListener("change", function (e) {
     const file = e.target.files[0];
     const preview = document.getElementById("preview");
     if (file) {
@@ -47,8 +50,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // 实时监听：INSERT 和 DELETE
-  supabase
+  // ⭐ Realtime 监听：直接走真实 Supabase（Worker 不支持 WebSocket）
+  supabaseDirect
     .channel('products-channel')
     .on(
       'postgres_changes',
@@ -63,32 +66,45 @@ document.addEventListener("DOMContentLoaded", () => {
       { event: 'DELETE', schema: 'public', table: 'products' },
       (payload) => {
         console.log('实时删除商品 ID:', payload.old.id);
-        const productElement = document.getElementById(`product-${payload.old.id}`);
-        if (productElement) productElement.remove();
+        const el = document.getElementById(`product-${payload.old.id}`);
+        if (el) el.remove();
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+      console.log('Realtime 状态:', status);
+    });
 });
 
 // ==================== 加载所有商品 ====================
 async function loadProducts() {
+  const container = document.getElementById("products");
+  container.innerHTML = '<p style="color:gray;">正在加载商品...</p>';
+
   const { data, error } = await supabase
     .from('products')
     .select('*')
-    .order('id', { ascending: false }); // 新建商品会出现在最上面
+    .order('id', { ascending: false });
 
   if (error) {
-    console.error("加载商品失败:", error.message);
-    document.getElementById("products").innerText = "加载商品失败，请检查网络或 RLS 策略。";
+    console.error("加载商品失败:", error);
+    container.innerHTML = `
+      <div style="color:red; border:1px solid red; padding:15px; border-radius:8px;">
+        <strong>❌ 加载商品失败</strong><br>
+        错误信息：${error.message}<br>
+        <small>请检查：1）Cloudflare Worker 是否正常运行 2）Supabase RLS 策略是否允许 SELECT</small>
+      </div>`;
     return;
   }
 
-  const container = document.getElementById("products");
   container.innerHTML = "";
+  if (data.length === 0) {
+    container.innerHTML = '<p style="color:gray;">暂无商品，卖家可以添加新商品。</p>';
+    return;
+  }
   data.forEach(product => renderProduct(product, container, false));
 }
 
-// ==================== 渲染单个商品卡片 ====================
+// ==================== 渲染商品卡片 ====================
 function renderProduct(product, container, prepend = false) {
   const div = document.createElement("div");
   div.className = "product";
@@ -96,21 +112,20 @@ function renderProduct(product, container, prepend = false) {
 
   let imgTag = "";
   if (product.image) {
-    imgTag = `<img src="${escapeHtml(product.image)}" width="200" onerror="this.style.display='none'">`;
+    imgTag = `<img src="${escapeHtml(product.image)}" width="200" onerror="this.style.display='none'" style="border-radius:6px;">`;
   }
 
-  // 根据是否为卖家决定是否显示删除按钮
   const deleteButton = window.isSeller
-    ? `<button onclick="deleteProduct(${product.id})" style="background:#e53935; color:white; margin-left:8px;">删除</button>`
+    ? `<button onclick="deleteProduct(${product.id})" style="background:#e53935;color:white;margin-left:8px;">删除</button>`
     : '';
 
   div.innerHTML = `
     <div>
       <h3>${escapeHtml(product.name)}</h3>
       ${imgTag}
-      <p>价格: ¥${product.price}</p>
-      <p>${escapeHtml(product.category || '')}</p>
-      <p>${escapeHtml(product.description || '')}</p>
+      <p><strong>价格：</strong>¥${product.price}</p>
+      ${product.category ? `<p><strong>分类：</strong>${escapeHtml(product.category)}</p>` : ''}
+      ${product.description ? `<p>${escapeHtml(product.description)}</p>` : ''}
       <button onclick="addToCart(${product.id})">加入购物车</button>
       ${deleteButton}
     </div>
@@ -123,31 +138,28 @@ function renderProduct(product, container, prepend = false) {
   }
 }
 
-// 实时监听时使用，插入到列表顶部
 function prependProduct(product) {
   const container = document.getElementById("products");
   renderProduct(product, container, true);
 }
 
-// ==================== 上传图片到 Supabase Storage ====================
+// ==================== 上传图片（直接走真实 Supabase Storage） ====================
 async function uploadImageToSupabase(file) {
   const fileExt = file.name.split('.').pop();
   const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${fileExt}`;
   const filePath = `public/${fileName}`;
 
-  const { data, error } = await supabase.storage
+  // ✅ 用 supabaseDirect（真实 URL）上传图片，Worker 不转发 Storage 请求
+  const { data, error } = await supabaseDirect.storage
     .from('product-images')
-    .upload(filePath, file, {
-      cacheControl: '3600',
-      upsert: false
-    });
+    .upload(filePath, file, { cacheControl: '3600', upsert: false });
 
   if (error) {
-    console.error("图片上传失败:", error.message);
+    console.error("图片上传失败:", error);
     return null;
   }
 
-  const { data: { publicUrl } } = supabase.storage
+  const { data: { publicUrl } } = supabaseDirect.storage
     .from('product-images')
     .getPublicUrl(filePath);
 
@@ -155,12 +167,13 @@ async function uploadImageToSupabase(file) {
 }
 
 // ==================== 发布商品 ====================
-window.publishProduct = async function() {
+window.publishProduct = async function () {
   const name = document.getElementById("name").value.trim();
   const price = document.getElementById("price").value;
   const category = document.getElementById("category").value.trim();
   const description = document.getElementById("description").value.trim();
   const fileInput = document.getElementById("imageInput");
+  const statusEl = document.getElementById("uploadStatus");
 
   if (!name || !price) {
     alert("请填写商品名称和价格");
@@ -169,26 +182,22 @@ window.publishProduct = async function() {
 
   let imageUrl = "";
   if (fileInput.files.length > 0) {
-    document.getElementById("uploadStatus").textContent = "正在上传图片...";
+    statusEl.textContent = "正在上传图片...";
+    statusEl.style.color = "gray";
     imageUrl = await uploadImageToSupabase(fileInput.files[0]);
     if (!imageUrl) {
-      document.getElementById("uploadStatus").textContent = "上传失败，请检查存储桶策略";
+      statusEl.textContent = "❌ 图片上传失败（检查 Storage 桶权限或 CORS 设置）";
+      statusEl.style.color = "red";
+      // 如果希望没有图片也能发布，删除下面这行
       return;
     }
-    document.getElementById("uploadStatus").textContent = "图片上传成功";
+    statusEl.textContent = "✅ 图片上传成功";
+    statusEl.style.color = "green";
   }
-
-  const productData = {
-    name,
-    price: parseFloat(price),
-    category,
-    description,
-    image: imageUrl
-  };
 
   const { error } = await supabase
     .from('products')
-    .insert([productData]);
+    .insert([{ name, price: parseFloat(price), category, description, image: imageUrl }]);
 
   if (error) {
     alert("添加商品失败：" + error.message);
@@ -196,18 +205,17 @@ window.publishProduct = async function() {
   }
 
   alert("商品发布成功！");
-  // 清空表单（商品列表会由 Realtime 自动更新，无需手动刷新）
   document.getElementById("name").value = "";
   document.getElementById("price").value = "";
   document.getElementById("category").value = "";
   document.getElementById("description").value = "";
   fileInput.value = "";
   document.getElementById("preview").style.display = "none";
-  document.getElementById("uploadStatus").textContent = "";
+  statusEl.textContent = "";
 };
 
 // ==================== 删除商品 ====================
-window.deleteProduct = async function(id) {
+window.deleteProduct = async function (id) {
   if (!confirm('确定要删除这个商品吗？')) return;
 
   const { error } = await supabase
@@ -220,24 +228,22 @@ window.deleteProduct = async function(id) {
     return;
   }
 
-  // 立即从页面上移除该商品（即使 Realtime 也会再次移除，双重保险）
-  const productElement = document.getElementById(`product-${id}`);
-  if (productElement) productElement.remove();
+  const el = document.getElementById(`product-${id}`);
+  if (el) el.remove();
   alert('商品已删除');
 };
 
-// ==================== 购物车示例 ====================
-window.addToCart = function(id) {
+// ==================== 购物车 ====================
+window.addToCart = function (id) {
   alert("已加入购物车: " + id);
 };
 
-// ==================== 工具函数：防 XSS ====================
+// ==================== 防 XSS ====================
 function escapeHtml(str) {
   const div = document.createElement('div');
-  div.appendChild(document.createTextNode(str));
+  div.appendChild(document.createTextNode(str || ''));
   return div.innerHTML;
-}
-
+  }
 
 //git add .
 //git commit -m "修改说明"
