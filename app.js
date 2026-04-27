@@ -1,101 +1,216 @@
-// ==================== Cloudflare Worker：Supabase 代理 ====================
-// 修复：允许 Supabase JS 客户端所需的全部请求头
+// ==================== 配置 ====================
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-const SUPABASE_URL = 'https://ixyzmvyfclaxvmritrxa.supabase.co';
+const WORKER_URL = 'https://black-brook-8bb8.wang192515.workers.dev';
+const SUPABASE_REAL_URL = 'https://ixyzmvyfclaxvmritrxa.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_FbpCE5UvEnCmuFcpRXMj5Q_hsFjm_ys';
 
-// 允许的来源（你的 GitHub Pages 地址）
-const ALLOWED_ORIGINS = [
-  'https://camera-shop.pages.dev',
-  'https://wyh51.github.io',
-  'http://localhost',        // 本地调试用
-  'http://127.0.0.1',
-];
+// 商品数据读写 → 走 Worker 代理（国内可访问）
+const supabase = createClient(WORKER_URL, SUPABASE_ANON_KEY);
 
-// Supabase JS 客户端会发送的所有请求头
-const ALLOWED_HEADERS = [
-  'Content-Type',
-  'Authorization',
-  'apikey',
-  'X-Client-Info',
-  'Accept',
-  'Accept-Profile',          // ✅ 修复：Supabase 必须
-  'Content-Profile',
-  'Prefer',
-  'Range',
-  'X-Retry-Count',           // ✅ 修复：Supabase 重试机制必须
-  'X-Supabase-Api-Version',
-].join(', ');
+// Realtime 实时监听 → 走真实 Supabase（WebSocket，Worker 不支持）
+const supabaseDirect = createClient(SUPABASE_REAL_URL, SUPABASE_ANON_KEY);
 
-function getCorsHeaders(origin) {
-  // 如果来源在白名单里就允许，否则拒绝（安全起见）
-  const allowedOrigin = ALLOWED_ORIGINS.includes(origin)
-    ? origin
-    : ALLOWED_ORIGINS[0];
-
-  return {
-    'Access-Control-Allow-Origin': allowedOrigin,
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': ALLOWED_HEADERS,
-    'Access-Control-Max-Age': '86400',  // 预检结果缓存 24 小时
-  };
+// ==================== 图片 URL 转换：Supabase Storage → Worker 代理 ====================
+function proxyImageUrl(originalUrl) {
+  if (!originalUrl) return '';
+  return originalUrl.replace(SUPABASE_REAL_URL, WORKER_URL);
 }
 
-export default {
-  async fetch(request, env, ctx) {
-    const origin = request.headers.get('Origin') || '';
+// ==================== 卖家入口 ====================
+const sellerSection = document.getElementById("sellerSection");
+const sellerEntryBtn = document.getElementById("sellerEntryBtn");
 
-    // ✅ 处理 OPTIONS 预检请求（CORS preflight）
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: getCorsHeaders(origin),
-      });
-    }
+sellerEntryBtn.addEventListener("click", () => {
+  const password = prompt("请输入卖家密码：");
+  if (password === "192515") {
+    sellerSection.style.display = "block";
+    sellerEntryBtn.style.display = "none";
+    window.isSeller = true;
+  } else if (password !== null) {
+    alert("密码错误！");
+  }
+});
 
-    // 构建转发到 Supabase 的真实 URL
-    const url = new URL(request.url);
-    const targetUrl = SUPABASE_URL + url.pathname + url.search;
-
-    // 复制原始请求头，并注入 Supabase 认证
-    const newHeaders = new Headers(request.headers);
-    newHeaders.set('apikey', SUPABASE_ANON_KEY);
-    newHeaders.set('Authorization', `Bearer ${SUPABASE_ANON_KEY}`);
-    // 删除 Host 头，避免 Supabase 校验失败
-    newHeaders.delete('Host');
-
-    // 转发请求到 Supabase
-    let supabaseResponse;
-    try {
-      supabaseResponse = await fetch(targetUrl, {
-        method: request.method,
-        headers: newHeaders,
-        body: ['GET', 'HEAD'].includes(request.method) ? null : request.body,
-      });
-    } catch (err) {
-      return new Response(JSON.stringify({ error: 'Worker 转发失败: ' + err.message }), {
-        status: 502,
-        headers: {
-          'Content-Type': 'application/json',
-          ...getCorsHeaders(origin),
-        },
-      });
-    }
-
-    // 把 Supabase 的响应返回给前端，附加 CORS 头
-    const responseHeaders = new Headers(supabaseResponse.headers);
-    const corsHeaders = getCorsHeaders(origin);
-    for (const [key, value] of Object.entries(corsHeaders)) {
-      responseHeaders.set(key, value);
-    }
-
-    return new Response(supabaseResponse.body, {
-      status: supabaseResponse.status,
-      statusText: supabaseResponse.statusText,
-      headers: responseHeaders,
-    });
-  },
+window.hideSellerSection = function () {
+  sellerSection.style.display = "none";
+  sellerEntryBtn.style.display = "inline-block";
+  window.isSeller = false;
 };
+
+// ==================== 页面初始化 ====================
+document.addEventListener("DOMContentLoaded", () => {
+  loadProducts();
+
+  document.getElementById("imageInput").addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    const preview = document.getElementById("preview");
+    if (file) {
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = "block";
+    }
+  });
+
+  // Realtime 监听（没梯子时可能超时，不影响主功能）
+  supabaseDirect
+    .channel('products-channel')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'products' }, (payload) => {
+      prependProduct(payload.new);
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'products' }, (payload) => {
+      const el = document.getElementById(`product-${payload.old.id}`);
+      if (el) el.remove();
+    })
+    .subscribe();
+});
+
+// ==================== 加载商品 ====================
+async function loadProducts() {
+  const container = document.getElementById("products");
+  container.innerHTML = '<p style="color:gray;">正在加载商品...</p>';
+
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .order('id', { ascending: false });
+
+  if (error) {
+    container.innerHTML = `
+      <div style="color:red;border:1px solid red;padding:15px;border-radius:8px;">
+        <strong>❌ 加载商品失败</strong><br>
+        错误信息：${error.message}
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = "";
+  if (data.length === 0) {
+    container.innerHTML = '<p style="color:gray;">暂无商品</p>';
+    return;
+  }
+  data.forEach(product => renderProduct(product, container, false));
+}
+
+// ==================== 渲染商品卡片 ====================
+function renderProduct(product, container, prepend = false) {
+  const div = document.createElement("div");
+  div.className = "product";
+  div.id = `product-${product.id}`;
+
+  // ✅ 图片走 Worker 代理，国内手机也能加载
+  let imgTag = "";
+  if (product.image) {
+    const proxiedUrl = proxyImageUrl(product.image);
+    imgTag = `<img src="${escapeHtml(proxiedUrl)}" width="200" onerror="this.style.display='none'" style="border-radius:6px;">`;
+  }
+
+  const deleteButton = window.isSeller
+    ? `<button onclick="deleteProduct(${product.id})" style="background:#e53935;color:white;margin-left:8px;padding:8px 14px;border:none;border-radius:6px;cursor:pointer;">删除</button>`
+    : '';
+
+  div.innerHTML = `
+    <div>
+      <h3>${escapeHtml(product.name)}</h3>
+      ${imgTag}
+      <p><strong>价格：</strong>¥${product.price}</p>
+      ${product.category ? `<p><strong>分类：</strong>${escapeHtml(product.category)}</p>` : ''}
+      ${product.description ? `<p>${escapeHtml(product.description)}</p>` : ''}
+      <button onclick="addToCart(${product.id})" style="background:#43a047;color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;margin-top:8px;">加入购物车</button>
+      ${deleteButton}
+    </div>
+  `;
+
+  prepend ? container.prepend(div) : container.appendChild(div);
+}
+
+function prependProduct(product) {
+  renderProduct(product, document.getElementById("products"), true);
+}
+
+// ==================== 上传图片（卖家操作，需要梯子） ====================
+async function uploadImageToSupabase(file) {
+  const fileExt = file.name.split('.').pop();
+  const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${fileExt}`;
+  const filePath = `public/${fileName}`;
+
+  const { error } = await supabaseDirect.storage
+    .from('product-images')
+    .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+  if (error) {
+    console.error("图片上传失败:", error);
+    return null;
+  }
+
+  const { data: { publicUrl } } = supabaseDirect.storage
+    .from('product-images')
+    .getPublicUrl(filePath);
+
+  return publicUrl;
+}
+
+// ==================== 发布商品 ====================
+window.publishProduct = async function () {
+  const name = document.getElementById("name").value.trim();
+  const price = document.getElementById("price").value;
+  const category = document.getElementById("category").value.trim();
+  const description = document.getElementById("description").value.trim();
+  const fileInput = document.getElementById("imageInput");
+  const statusEl = document.getElementById("uploadStatus");
+
+  if (!name || !price) { alert("请填写商品名称和价格"); return; }
+
+  let imageUrl = "";
+  if (fileInput.files.length > 0) {
+    statusEl.textContent = "正在上传图片...";
+    statusEl.style.color = "gray";
+    imageUrl = await uploadImageToSupabase(fileInput.files[0]);
+    if (!imageUrl) {
+      statusEl.textContent = "❌ 图片上传失败（请挂梯子后重试）";
+      statusEl.style.color = "red";
+      return;
+    }
+    statusEl.textContent = "✅ 图片上传成功";
+    statusEl.style.color = "green";
+  }
+
+  const { error } = await supabase
+    .from('products')
+    .insert([{ name, price: parseFloat(price), category, description, image: imageUrl }]);
+
+  if (error) { alert("添加商品失败：" + error.message); return; }
+
+  alert("商品发布成功！");
+  document.getElementById("name").value = "";
+  document.getElementById("price").value = "";
+  document.getElementById("category").value = "";
+  document.getElementById("description").value = "";
+  fileInput.value = "";
+  document.getElementById("preview").style.display = "none";
+  statusEl.textContent = "";
+  loadProducts();
+};
+
+// ==================== 删除商品 ====================
+window.deleteProduct = async function (id) {
+  if (!confirm('确定要删除这个商品吗？')) return;
+  const { error } = await supabase.from('products').delete().eq('id', id);
+  if (error) { alert('删除失败：' + error.message); return; }
+  const el = document.getElementById(`product-${id}`);
+  if (el) el.remove();
+  alert('商品已删除');
+};
+
+// ==================== 购物车 ====================
+window.addToCart = function (id) { alert("已加入购物车: " + id); };
+
+// ==================== 防 XSS ====================
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(str || ''));
+  return div.innerHTML;
+}
+
 
 //git add .
 //git commit -m "修改说明"
