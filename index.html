@@ -1,47 +1,181 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh">
 <head>
   <meta charset="UTF-8">
-  <title>Camera Shop</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Camera Shop 摄像头商城</title>
   <style>
-    body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
-    .product { border: 1px solid #ddd; padding: 15px; margin: 10px 0; display: flex; align-items: center; gap: 20px; }
-    .product img { width: 150px; height: auto; }
-    button { padding: 8px 16px; cursor: pointer; }
-    .upload-section { background: #f9f9f9; padding: 20px; margin-bottom: 30px; display: none; }
-    input, textarea { width: 100%; padding: 8px; margin: 5px 0; box-sizing: border-box; }
-    .preview { margin-top: 10px; display: none; }
-    .seller-btn { margin-bottom: 20px; background: #ff9800; color: white; border: none; }
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #1a1a2e; }
+
+    /* 卖家入口按钮 */
+    .seller-btn {
+      margin-bottom: 20px;
+      background: #ff9800;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .seller-btn:hover { background: #e68900; }
+
+    /* 卖家上传区 */
+    .upload-section {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 30px;
+      display: none;
+    }
+    .upload-section h2 { margin-top: 0; color: #333; }
+    input[type="text"],
+    input[type="number"],
+    textarea {
+      width: 100%;
+      padding: 10px;
+      margin: 6px 0;
+      box-sizing: border-box;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    textarea { resize: vertical; }
+    #preview {
+      margin-top: 10px;
+      max-width: 200px;
+      border-radius: 6px;
+      display: none;
+    }
+    #uploadStatus { font-size: 13px; margin: 6px 0; }
+
+    /* 操作按钮 */
+    .btn-publish {
+      background: #1976d2;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 8px;
+    }
+    .btn-publish:hover { background: #1565c0; }
+    .btn-exit {
+      background: #9e9e9e;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    /* 商品列表 */
+    #products { margin-top: 10px; }
+    .product {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 16px;
+      margin: 12px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .product img {
+      width: 160px;
+      height: 120px;
+      object-fit: cover;
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+    .product-info h3 { margin: 0 0 8px; color: #1a1a2e; }
+    .product-info p { margin: 4px 0; color: #555; font-size: 14px; }
+    .product-info .price { font-size: 18px; color: #e53935; font-weight: bold; }
+
+    .btn-cart {
+      background: #43a047;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .btn-cart:hover { background: #388e3c; }
+    .btn-delete {
+      background: #e53935;
+      color: white;
+      border: none;
+      padding: 8px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      margin-top: 8px;
+      margin-left: 8px;
+    }
+    .btn-delete:hover { background: #c62828; }
+
+    /* 调试说明区 */
+    #debug-info {
+      background: #fff8e1;
+      border: 1px solid #ffe082;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: #5d4037;
+    }
+    #debug-info summary { cursor: pointer; font-weight: bold; }
   </style>
 </head>
 <body>
-  <h1>摄像头商城</h1>
+  <h1>📷 摄像头商城</h1>
 
-  <!-- 卖家入口按钮 -->
-  <button class="seller-btn" id="sellerEntryBtn">卖家入口</button>
+  <!-- 调试提示（部署稳定后可删除） -->
+  <details id="debug-info">
+    <summary>🔧 如果页面空白，点此查看排查提示</summary>
+    <ul>
+      <li>打开浏览器 <strong>F12 → Console</strong>，查看红色报错</li>
+      <li>常见错误：<code>Failed to fetch</code> → Worker 未运行或 URL 错误</li>
+      <li>常见错误：<code>RLS</code> → Supabase 未开放 SELECT 权限</li>
+      <li>常见错误：<code>Storage</code> → product-images 桶未设为 public</li>
+    </ul>
+  </details>
+
+  <!-- 卖家入口 -->
+  <button class="seller-btn" id="sellerEntryBtn">🔑 卖家入口</button>
 
   <!-- 卖家上传区（默认隐藏） -->
   <div class="upload-section" id="sellerSection">
-    <h2>添加新商品（卖家使用）</h2>
-    <input type="text" id="name" placeholder="商品名称" required>
-    <input type="number" id="price" placeholder="价格" step="0.01" required>
-    <input type="text" id="category" placeholder="分类（如：室外/室内）">
-    <textarea id="description" placeholder="描述" rows="3"></textarea>
-
+    <h2>添加新商品</h2>
+    <input type="text" id="name" placeholder="商品名称 *" required>
+    <input type="number" id="price" placeholder="价格（元）*" step="0.01" required>
+    <input type="text" id="category" placeholder="分类（如：室外 / 室内 / 无线）">
+    <textarea id="description" placeholder="商品描述" rows="3"></textarea>
     <p>上传图片：</p>
     <input type="file" id="imageInput" accept="image/*">
-    <img id="preview" class="preview" width="200">
-    <p id="uploadStatus" style="color: gray;"></p>
-
-    <button onclick="publishProduct()">发布商品</button>
-    <button onclick="hideSellerSection()" style="background:#ccc;">退出卖家模式</button>
+    <img id="preview">
+    <p id="uploadStatus"></p>
+    <button class="btn-publish" onclick="publishProduct()">🚀 发布商品</button>
+    <button class="btn-exit" onclick="hideSellerSection()">退出卖家模式</button>
   </div>
 
   <!-- 商品展示区 -->
-  <h2>商品列表 <small>（实时更新）</small></h2>
+  <h2>商品列表 <small style="color:gray;font-size:14px;">（实时更新）</small></h2>
   <div id="products"></div>
 
-  <!-- 关键：必须使用 type="module" 才能支持 ES Module 的 import -->
   <script type="module" src="app.js"></script>
 </body>
 </html>
